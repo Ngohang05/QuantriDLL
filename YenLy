@@ -1,0 +1,8 @@
+!pip install pyspark -q
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import * # A better practice would be importing only necessary functions (like comments below)
+# from pyspark.sql.functions import col, sum, count, avg, round
+# from pyspark.sql.functions import length, desc, expr, sum, count
+# import pyspark
+
+spark = SparkSession.builder.appName("HotelAnalysis").master("local[*]").getOrCreate()

@@ -1,0 +1,149 @@
+# TODO: Explore MORE!
+# Alternative: Fill in the 0.0 with average daily rate of the hotel (we can also factor in month to capture the possible seasonal effects on the price)
+# For instance, in the tourist peak season, the hotel would want to charge their guests more to earn more money
+
+# Find the average adr of each month
+adrByMonth = (
+    hotelBooking_index
+    .select("arrival_date_year","arrival_date_month", "adr")
+)
+
+adrByMonthFiltered = (
+    adrByMonth
+    .filter(col("adr") != 0)
+)
+
+avrByYearMonth = (
+    adrByMonthFiltered
+    .groupBy("arrival_date_year","arrival_date_month")
+ .agg(
+        round(avg(col("adr")),2).alias("average_adr")
+    )
+).orderBy("arrival_date_year","average_adr")
+
+print("Computing Average Daily Rate for each pair of year and month: ")
+avrByYearMonth.filter(col("arrival_date_year") == "2015").show()
+
+# LEFT JOIN: hotelBookingCost and avrByYearMonth
+# conditions := condition for performing LEFT JOIN operation
+conditions = (
+    (hotelBookingCost["arrival_date_year"] == avrByYearMonth["arrival_date_year"]) &
+    (hotelBookingCost["arrival_date_month"] == avrByYearMonth["arrival_date_month"])
+)
+
+final_features = ["hotel","is_canceled","num_nights","num_guests","finalized_adr"]
+
+joinedHotelBookingAdr = (
+    hotelBookingCost
+    .filter((col("num_nights") != 0) & (col("num_guests") != 0))
+    .join(avrByYearMonth, conditions ,"left")
+    .withColumn("finalized_adr", when(col("adr").cast(T.IntegerType()) == 0, col("average_adr"))
+                                .otherwise(col("adr")))
+).select(*final_features)
+
+print("Finalized table with adjusted average daily rate: ")
+joinedHotelBookingAdr.show()
+
+summaryHotelBookingCostALT = (
+joinedHotelBookingAdr
+    .withColumn("total_booking_cost", round(col("num_nights") * col("finalized_adr"),2))
+    .withColumn("avr_booking_per_guest", round(col("total_booking_cost") / col("num_guests"),2))
+)
+
+print("Summary: ")
+summaryHotelBookingCostALT.show()
+hotelRevenue = (
+    summaryHotelBookingCostALT
+    .groupBy("hotel")
+    .agg(
+        sum("total_booking_cost").alias("expected_revenue"),
+        sum(expr(f"CASE WHEN is_canceled = 1 THEN total_booking_cost ELSE 0 END")).alias("revenue_lost"),
+        (col("expected_revenue") - col("revenue_lost")).alias("revenue"),
+        (col("revenue_lost") * 100 / col("expected_revenue")).alias("revenue_lost_percentage")
+    )
+    .select(
+        col("hotel"),
+        format_number(col("expected_revenue"), 2).alias("expected_revenue"),
+        format_number(col("revenue"),2).alias("revenue"),
+        format_number(col("revenue_lost"), 2).alias("revenue_lost"),
+        round(col("revenue_lost_percentage"),2).alias("revenue_lost_percentage")
+   )
+)
+
+print("Hotel Revenue Summary: ")
+hotelRevenue.show()
+CREATE new column "isRequestedRoom"
+
+FOR each rows in hotelBooking:
+    # Get requested room
+    IF reserved_room_types.value == assigned_room_type:
+    THEN isRequestedRoom = 0
+
+    # Not getting requested room
+    ELSE: isRequestedRoom = 1
+room_features = ["hotel","is_canceled","reserved_room_type","assigned_room_type","isRequestedRoom"]
+
+reservedRoom = (
+    hotelBooking
+    .withColumn("isRequestedRoom", when(col("reserved_room_type") == col("assigned_room_type"), 1)
+                                  .otherwise(0))
+).select(*room_features)
+
+hotelReservedRoom = (
+    reservedRoom
+    .groupBy("hotel")
+    .agg(
+        round((sum(col("isRequestedRoom")) * 100 / count(col("hotel"))),2).alias("getting_requested_room_per")
+    )
+)
+print("Describe the percentage of guest that get the room they requested: ")
+hotelReservedRoom.show()
+# Out of all the canceled reservation, how many reservation does the guest didn't get the requested room
+print("Relationship between Booking Cancellation and Not getting assigned room")
+canceledReservationRoomDiff = (
+    reservedRoom
+    .filter(col("is_canceled") == 1)
+    .groupBy("hotel")
+    .agg(
+        sum(col("isRequestedRoom")).alias("total_not_assinged_room"),
+        count("hotel").alias("total_cancellation"),
+        round((sum(col("isRequestedRoom")) * 100 / count("hotel")),2).alias("canceled_not_requested_room_per")
+    )
+)
+
+canceledReservationRoomDiff.show()
+# Return Guests at the hotel
+# What exactly is the meaning of previous_cancellations and previous_bookings_not_canceled
+
+guestReturningHist = (
+    hotelBooking
+    .select("hotel","is_canceled","is_repeated_guest","previous_cancellations","previous_bookings_not_canceled")
+    .groupBy("hotel")
+    .agg(
+        round((sum("is_canceled") * 100 / count("hotel")),2).alias("cancellation_rate"), 
+        round((sum("is_repeated_guest") * 100 / count("hotel")),2).alias("returnGuest_rate"), 
+        sum("previous_cancellations").alias("total_prev_canceled"), 
+        sum("previous_bookings_not_canceled").alias("total_prev_not_canceled"), 
+        count("hotel").alias("total_booking")
+    )
+)
+    
+
+guestReturningHist.show()
+# Another approach. Create temp view and use SQL queries 
+hotelBooking.createOrReplaceTempView("hotel_booking")
+
+
+queries = """
+    select 
+        customer_type,
+        sum(is_canceled) as total_canceled
+    from hotel_booking
+    group by customer_type
+    order by total_canceled desc
+"""
+
+customerTypeSQL = spark.sql(queries)
+
+print("Customer Type and Total Cancellation")
+customerTypeSQL.show()

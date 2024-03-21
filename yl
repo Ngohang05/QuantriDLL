@@ -1,0 +1,44 @@
+!pip install pyspark -q
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import * # A better practice would be importing only necessary functions (like comments below)
+# from pyspark.sql.functions import col, sum, count, avg, round
+# from pyspark.sql.functions import length, desc, expr, sum, count
+# import pyspark
+
+spark = SparkSession.builder.appName("HotelAnalysis").master("local[*]").getOrCreate()
+hotel_bookings_path = "/kaggle/input/hotel-booking-demand/hotel_bookings.csv"
+hotelBooking = spark.read.csv(hotel_bookings_path, inferSchema=True, header=True) # DataFrame type
+# Show the schema of the data
+hotelBooking.printSchema()
+hotelBooking_index = (
+    hotelBooking
+    .select("*")
+    .withColumn("index", monotonically_increasing_id())
+)
+
+# After cleaning, remove this import statement
+import pyspark.sql.types as T
+
+features = ["index","hotel","is_canceled","arrival_date_year",
+            "arrival_date_month","adr","num_nights","num_guests"]
+hotelBookingCost = (
+    hotelBooking_index
+    .withColumn("num_guests", (col("adults") + col("children") + col("babies")).cast(T.IntegerType()))
+    .withColumn("num_nights", (col("stays_in_weekend_nights") + col("stays_in_week_nights").cast(T.IntegerType())))
+).select(*features)
+
+# Removed rows with average daily rate of 0.0
+# Alternative Approach (for dealing with 0.0 value in adr column) in the following cell 
+hotelBookingCostFiltered = (
+    hotelBookingCost
+    .filter((col("adr") != 0) & (col("num_nights") != 0) & (col("num_guests") != 0))
+)
+
+summaryHotelBookingCost = (
+    hotelBookingCostFiltered
+    .withColumn("total_booking_cost", round(col("num_nights") * col("adr"),2))
+    .withColumn("avr_booking_per_guest", round(col("total_booking_cost") / col("num_guests"),2))
+)
+
+summaryHotelBookingCost.show()
+

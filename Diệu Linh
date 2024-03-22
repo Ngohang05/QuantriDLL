@@ -1,0 +1,78 @@
+# Customer Type, Agent, and Company
+from pyspark.sql.types import IntegerType
+
+customerAgentRelation = hotelBooking \
+    .select("hotel","is_canceled","customer_type",col("agent").cast(IntegerType()), "previous_cancellations") \
+    .filter(col("agent").isNotNull()) \
+    .groupBy("agent","hotel","customer_type") \
+    .agg(
+        sum("is_canceled").alias("total_cancellation"), \
+        count("customer_type").alias("customer_number"), \
+        round((col("total_cancellation") * 100 / col("customer_number")),2).alias("cancellation_rate"), \
+        sum("previous_cancellations").alias("total_prev_cancellation") # Recheck this 
+    ).orderBy(asc("agent"), "hotel", "customer_type")
+
+print("Agent and Customer Type Relation Analysis: ")
+# customerAgentRelation.show(customerAgentRelation.count())
+
+customerAgentRelation.show(20)
+# Customer Type, Agent, and Company
+from pyspark.sql.types import IntegerType
+
+customerAgentRelation = hotelBooking \
+    .select("hotel","is_canceled","customer_type",col("agent").cast(IntegerType()), "previous_cancellations") \
+    .filter(col("agent").isNotNull()) \
+    .groupBy("agent","hotel","customer_type") \
+    .agg(
+        sum("is_canceled").alias("total_cancellation"), \
+        count("customer_type").alias("customer_number"), \
+        round((col("total_cancellation") * 100 / col("customer_number")),2).alias("cancellation_rate"), \
+        sum("previous_cancellations").alias("total_prev_cancellation") # Recheck this 
+    ).orderBy(asc("agent"), "hotel", "customer_type")
+
+print("Agent and Customer Type Relation Analysis: ")
+# customerAgentRelation.show(customerAgentRelation.count())
+
+customerAgentRelation.show(20)
+# Overall cancellation rate (and in percentage) of this dataset
+hotelBooking.select(expr("avg(is_canceled) as average_cancellation")).withColumn("avg_cancel_per", col("average_cancellation") * 100).show()
+# Average Booking Volumes for each Agent
+# Average Booking cancellation for each hotel when the booking is done via an agent
+hotelBooking.select("hotel","is_canceled",col("agent").cast(IntegerType())).filter(col("agent").isNotNull()) \
+.groupBy("hotel").avg("is_canceled").show()
+hotelBooking.select("hotel","is_canceled",col("agent").cast(IntegerType())).filter(col("agent").isNotNull()) \
+.groupBy("agent","hotel").agg(count("agent").alias("total_transaction")).orderBy("agent").show()
+# Agent, Booking Cancellation, and Track record of previous cancellation
+hotelBooking.select(col("agent").cast(IntegerType()),"is_canceled","previous_cancellations").filter(col("agent").isNotNull()) \
+.orderBy("agent").show()
+# QUESTION: Cancelation by market Segment
+bookingMarketSegment = hotelBooking \
+    .select("hotel","is_canceled","market_segment","deposit_type","customer_type")\
+    .groupBy("market_segment")\
+    .agg(
+        sum("is_canceled").alias("total_canceled"),\
+        count("market_segment").alias("total_booking")
+    ).withColumn("cancellation_percentage", round(col("total_canceled") * 100 / col("total_booking"),2)) \
+    .orderBy(desc("cancellation_percentage"))
+
+bookingMarketSegment.show()
+
+
+# Just showing that there are multiple ways of doing this 
+
+print("Using SQL Queries")
+# Register the DataFrame as a temporary view
+hotelBooking.createOrReplaceTempView("hotel_booking")
+
+# Execute the SQL query
+bookingMarketSegment_SQL = spark.sql("""
+    SELECT market_segment,
+           SUM(is_canceled) AS total_canceled,
+           COUNT(market_segment) AS total_booking,
+           ROUND(SUM(is_canceled) * 100 / COUNT(market_segment), 2) AS cancellation_percentage
+    FROM hotel_booking
+    GROUP BY market_segment
+    ORDER BY cancellation_percentage DESC
+""")
+
+bookingMarketSegment_SQL.show()

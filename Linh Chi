@@ -1,0 +1,76 @@
+# QUESTION: Cancelation by market Segment
+bookingMarketSegment = hotelBooking \
+    .select("hotel","is_canceled","market_segment","deposit_type","customer_type")\
+    .groupBy("market_segment")\
+    .agg(
+        sum("is_canceled").alias("total_canceled"),\
+        count("market_segment").alias("total_booking")
+    ).withColumn("cancellation_percentage", round(col("total_canceled") * 100 / col("total_booking"),2)) \
+    .orderBy(desc("cancellation_percentage"))
+
+bookingMarketSegment.show()
+
+# Just showing that there are multiple ways of doing this 
+print("Using SQL Queries")
+
+# Register the DataFrame as a temporary view
+hotelBooking.createOrReplaceTempView("hotel_booking")
+
+# Execute the SQL query
+bookingMarketSegment_SQL = spark.sql("""
+    SELECT market_segment,
+           SUM(is_canceled) AS total_canceled,
+           COUNT(market_segment) AS total_booking,
+           ROUND(SUM(is_canceled) * 100 / COUNT(market_segment), 2) AS cancellation_percentage
+    FROM hotel_booking
+    GROUP BY market_segment
+    ORDER BY cancellation_percentage DESC
+""")
+
+bookingMarketSegment_SQL.show()
+
+# QUESTION: Countries distribution and their cancellation
+
+bookingCountry = hotelBooking.select("hotel","is_canceled","country")
+canceledBookingCountry = bookingCountry\
+    .groupBy("country")\
+    .agg(
+        sum("is_canceled").alias("total_cancellation"), \
+        count("country").alias("total_booking"), \
+    ).withColumn("cancellation_percentage", round(col("total_cancellation") * 100 / col("total_booking"),2)) \
+    .orderBy(desc("total_cancellation"))
+
+canceledBookingCountry.show()
+
+# QUESTION: Adualt, Chldren, and Babies at the Hotel
+
+guestDistribution = hotelBooking \
+    .select("hotel","is_canceled","adults","children","babies") \
+    .withColumn("canceld_string", expr("case when is_canceled = 0 then 'No' else 'Yes' end")) \
+    
+guestDistribution.show()
+
+# ADULT
+adultBooking = hotelBooking \
+    .select("adults","children","babies","agent","company","is_canceled") \
+    .withColumn("via_agent", expr("case when agent >=0 then 1 else 0 end")) \
+    .withColumn("via_company", expr("case when company >=0 then 1 else 0 end")) \
+    .groupBy("adults") \
+    .agg( 
+        sum("children").alias("num_children"), \
+        sum("babies").alias("num_babies"), \
+        sum("is_canceled").alias("total_cancelation"), \
+        sum("via_agent").alias("total_via_agent"), \
+        sum("via_company").alias("total_via_company"), \
+        count("adults").alias("total_booking"), \
+    ).orderBy(col("adults"))
+
+adultBooking.show()
+
+# QUESTION: Explore the behavior of number of stays and variation in season (only success booking)
+hotelNights = hotelBooking \
+    .select("hotel","is_canceled","arrival_date_month","stays_in_weekend_nights","stays_in_week_nights") \
+    .filter( (col("is_canceled") == 0) & (col("stays_in_weekend_nights") != 0) & (col("stays_in_week_nights") != 0)) \
+    .withColumn("total_night", col("stays_in_weekend_nights") + col("stays_in_week_nights")) \
+
+hotelNights.show()

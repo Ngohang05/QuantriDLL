@@ -1,4 +1,5 @@
 # QUESTION: Cancelation by market Segment
+
 bookingMarketSegment = hotelBooking \
     .select("hotel","is_canceled","market_segment","deposit_type","customer_type")\
     .groupBy("market_segment")\

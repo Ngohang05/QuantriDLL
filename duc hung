@@ -1,0 +1,44 @@
+# Average night at each hotel
+hotelNights.groupBy("hotel").avg().show()
+month_order = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+]
+
+summaryHotelNights = hotelNights \
+    .groupBy("hotel","arrival_date_month") \
+    .agg(
+        sum("total_night").alias("total_nights_by_month"), \
+        round(avg("total_night")).alias("average_night_by_month") \
+    ).withColumn("month_index", expr("array_position(array({}), arrival_date_month)".format(",".join("'{}'".format(month) for month in month_order)))) \
+    .orderBy("hotel","month_index")
+
+summaryHotelNights.show(summaryHotelNights.count())
+# Average Night at Each Hotel
+summaryHotelNights.groupBy("hotel").agg(round(avg("average_night_by_month")).alias("average_nights_per_year")).show()
+# QUESTION: Investigate the data about agents for Resort Hotel (similar analysis can be done for City Hotel as well)
+
+agentSummary = hotelBooking \
+    .select(col("agent").cast(IntegerType()), "is_canceled", "hotel") \
+    .filter((col("agent") >= 0) & (col("hotel") == "Resort Hotel")) \
+    .groupBy("agent")\
+    .agg(
+        sum("is_canceled").alias("total_canceled"), \
+        count("agent").alias("total_booking"), \
+    ) \
+    .withColumn("canceled_rate", expr("round(total_canceled * 100 / total_booking, 2)")) \
+    .orderBy(desc("total_canceled"))
+
+agentSummary.show()
+# QUESTION: For each Hotel, what is the number of successful booking, canceled booking, and average cancelation 
+
+hotelBookingSummary = hotelBooking \
+    .select("hotel","is_canceled") \
+    .groupBy("hotel") \
+    .agg( \
+        sum("is_canceled").alias("total_canceled"), \
+        count("hotel").alias("total_booking"), \
+        round((avg("is_canceled") * 100),2).alias("cancelation_ratio")
+    )
+
+hotelBookingSummary.show()

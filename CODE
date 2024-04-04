@@ -1,0 +1,199 @@
+# import thư viện
+!pip install xgboost -q
+import warnings
+warnings.filterwarnings('ignore')
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import xgboost as xgb
+from matplotlib.colors import ListedColormap, LinearSegmentedColormap
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score, roc_auc_score
+from sklearn.metrics import classification_report, RocCurveDisplay, ConfusionMatrixDisplay
+# Đọc dữ liệu
+df = pd.read_csv('C:/Users/Windows/Downloads/Hotel Booking Analysis using PySpark/hotel_bookings.csv')
+df.head()
+# Thông tin dữ liệu
+df.info()
+#Thống kê
+df.describe()
+# Tỷ lệ hủy đặt phòng
+df.groupby('reservation_status')['is_canceled'].mean()
+#Chuyển đổi dữ liệu
+df['reservation_status_date'] = pd.to_datetime(df['reservation_status_date'])
+
+#Trích xuất dữ liệu
+df['reservation_status_days_difference'] = (df['reservation_status_date'] - pd.to_datetime(df['arrival_date_year'].astype(str) 
+                + '-' + df['arrival_date_month'] + '-' + df['arrival_date_day_of_month'].astype(str))).dt.days
+
+df[['reservation_status_days_difference']].head()
+# Đếm slg giá trị xuất hiện ở arrival_date_year
+df['arrival_date_year'].value_counts()
+# Biểu đồ phân phối
+plt.figure(figsize=(12, 4))
+sns.histplot(data=df, x="reservation_status_days_difference", hue="is_canceled", element="step", stat="density", common_norm=False)
+plt.title('Density Distribution of reservation_status_days_difference by is_canceled')
+plt.show()
+# Biểu đồ cột đếm slg hủy đặt phòng theo trạng thái đặt
+plt.figure(figsize=(10, 5))
+sns.countplot(x='reservation_status', hue='is_canceled', data=df, palette=['darkturquoise', 'royalblue'])
+plt.title('Count of Cancellations by Reservation Status')
+plt.xlabel('Reservation Status')
+plt.ylabel('Count')
+plt.legend(title='Is Canceled', labels=['Not Canceled', 'Canceled'])
+plt.show()
+print("Distribution of 'is_canceled' when 'reservation_status_days_difference' is positive:\n")
+print(df[df['reservation_status_days_difference'] > 0]['is_canceled'].value_counts())
+print("\n" + "-"*85)
+print("\nDistribution of 'is_canceled' when 'reservation_status_days_difference' is negative:\n")
+print(df[df['reservation_status_days_difference'] < 0]['is_canceled'].value_counts())
+# Đếm dữ liệu nhiễu
+noisy_data = {
+    'adr':      df[df['adr'] < 0],
+    'adults':   df[df['adults'] == 0],
+    'children': df[df['children'] == 10],
+    'babies':   df[df['babies'] == 10],
+}
+
+noisy_data_count = {key: len(value) for key, value in noisy_data.items()}
+noisy_data_count
+months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+df['arrival_date_month'] = df['arrival_date_month'].apply(lambda x: months.index(x) + 1)
+
+# One-hot encode the specified columns
+one_hot_cols = ['hotel', 'meal', 'market_segment', 'distribution_channel', 'reserved_room_type', 'deposit_type', 'customer_type']
+df = pd.get_dummies(df, columns=one_hot_cols, drop_first=True)
+
+df.info()
+# Biểu đồ cột
+percentage = df['is_canceled'].value_counts(normalize=True) * 100
+plt.figure(figsize=(8, 5))
+ax = sns.barplot(x=percentage.index, y=percentage, palette=['darkturquoise', 'royalblue'])
+plt.title('Percentage of Cancellations and Non-Cancellations')
+plt.xlabel('Is Canceled')
+plt.ylabel('Percentage (%)')
+plt.xticks(ticks=[0, 1], labels=['Not Canceled', 'Canceled'])
+plt.yticks(ticks=range(0,80,10))
+for i, p in enumerate(percentage):
+    ax.text(i, p + 0.5, f'{p:.2f}%', ha='center', va='bottom')
+
+plt.show()
+# Định nghĩa các đặc trưng
+X = df.drop('is_canceled', axis=1)
+y = df['is_canceled']
+# Chia tập huấn luyện và ktra
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0, stratify=y)
+# Decision Tree
+dt_base = DecisionTreeClassifier(random_state=0)
+def tune_clf_hyperparameters(clf, param_grid, X_train, y_train, scoring='f1', n_splits=5):
+     cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
+     clf_grid = GridSearchCV(clf, param_grid, cv=cv, scoring=scoring, n_jobs=-1)
+     clf_grid.fit(X_train, y_train)
+     best_hyperparameters = clf_grid.best_params_
+     return clf_grid.best_estimator_, best_hyperparameters
+
+# Hyperparameter tuning for Decision Tree
+param_grid_dt = {
+    'criterion': ['gini', 'entropy'],
+    'max_depth': [13, 14, 15],
+    'min_samples_split': [2, 3, 4],
+    'min_samples_leaf': [1, 2, 3],
+    'class_weight': [{0: 1, 1: w} for w in [1, 2, 3]]
+}
+
+# Tinh chỉnh siêu tham số cho cây quyết định
+best_dt, best_dt_hyperparams = tune_clf_hyperparameters(dt_base, param_grid_dt, X_train, y_train)
+print('DT Optimal Hyperparameters: \n', best_dt_hyperparams)
+# Các độ đo hiệu suất
+def metrics_calculator(clf, X_test, y_test, model_name):
+    y_pred = clf.predict(X_test)
+    result = pd.DataFrame(data=[accuracy_score(y_test, y_pred),
+                                precision_score(y_test, y_pred, pos_label=1),
+                                recall_score(y_test, y_pred, pos_label=1),
+                                f1_score(y_test, y_pred, pos_label=1),
+                                roc_auc_score(y_test, clf.predict_proba(X_test)[:,1])],
+                          index=['Accuracy','Precision (Class 1)','Recall (Class 1)','F1-score (Class 1)','AUC (Class 1)'],
+                          columns = [model_name])
+    
+    result = (result * 100).round(2).astype(str) + '%'                            
+    return result
+def model_evaluation(clf, X_train, X_test, y_train, y_test, model_name):
+    '''
+    This function provides a complete report of the model's performance including classification reports, 
+    confusion matrix and ROC curve.
+    '''
+    sns.set(font_scale=1.2)
+    
+    # Generate classification report for training set
+    y_pred_train = clf.predict(X_train)
+    print("\n\t  Classification report for training set")
+    print("-"*55)
+    print(classification_report(y_train, y_pred_train))
+    # Generate classification report for test set
+    y_pred_test = clf.predict(X_test)
+    print("\n\t   Classification report for test set")
+    print("-"*55)
+    print(classification_report(y_test, y_pred_test))
+    
+    # Create figure and subplots 
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5), dpi=100, gridspec_kw={'width_ratios': [2, 2, 1]})
+    # Define a colormap
+    royalblue = LinearSegmentedColormap.from_list('royalblue', [(0, (1,1,1)), (1, (0.25,0.41,0.88))])
+    royalblue_r = royalblue.reversed()
+    # Plot confusion matrix for test set
+    ConfusionMatrixDisplay.from_estimator(clf, X_test, y_test, colorbar=False, cmap=royalblue_r, ax=ax1)
+    ax1.set_title('Confusion Matrix for Test Data')                                     
+    ax1.grid(False)
+    # Plot ROC curve for test data and display AUC score 
+    RocCurveDisplay.from_estimator(clf, X_test, y_test, ax=ax2)
+    ax2.set_xlabel('False Positive Rate')
+    ax2.set_ylabel('True Positive Rate')
+    ax2.set_title('ROC Curve for Test Data (Positive label: 1)')
+    result = metrics_calculator(clf, X_test, y_test, model_name)
+    table = ax3.table(cellText=result.values, colLabels=result.columns, rowLabels=result.index, loc='center')
+    table.scale(0.6, 2)
+    table.set_fontsize(12)
+    ax3.axis('tight')
+    ax3.axis('off')
+    # Modify color 
+    for key, cell in table.get_celld().items():
+        if key[0] == 0:
+            cell.set_color('royalblue')
+    plt.tight_layout()
+    plt.show() 
+#Random Forest
+rf_base = RandomForestClassifier(random_state=0, n_jobs=-1)
+#RF hyperparameter tuning
+param_grid_rf = {
+    'n_estimators': [100, 150],
+    'criterion': ['entropy'],
+    'max_depth': [16, 18],
+    'min_samples_split': [2, 3, 4],
+    'min_samples_leaf': [1, 2, 3],
+    'class_weight': [{0: 1, 1: w} for w in [1, 2, 3]]
+}
+
+best_rf, best_rf_hyperparams = tune_clf_hyperparameters(rf_base, param_grid_rf, X_train, y_train)
+print('RF Optimal Hyperparameters: \n', best_rf_hyperparams)
+model_evaluation(best_rf, X_train, X_test, y_train, y_test, 'Random Forest')
+# XGBoost
+xgb_base = xgb.XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=0)
+param_grid_xgb = {
+    'n_estimators': [250, 350],
+    'learning_rate': [0.01, 0.1],
+    'max_depth': [7, 8],
+    'subsample': [0.7, 0.8],
+    'colsample_bytree': [0.8, 0.9],
+    'scale_pos_weight': [1, (y_train == 0).sum() / (y_train == 1).sum()]
+}
+best_xgb, best_xgb_hyperparams = tune_clf_hyperparameters(xgb_base, param_grid_xgb, X_train, y_train)
+print('XGBoost Optimal Hyperparameters: \n', best_xgb_hyperparams)
+model_evaluation(best_xgb, X_train, X_test, y_train, y_test, 'XGBoost')
+xgb_result = metrics_calculator(best_xgb, X_test, y_test, 'XGBoost')
+xgb_result
